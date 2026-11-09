@@ -1,9 +1,9 @@
 import { ChevronLeft, ChevronRight, Lock, Puzzle, RotateCw, SquarePen, UserRound } from 'lucide-react';
-import { HOST_HISTORY, PAST_TREES } from '../data/forest';
-import { LIVE_TREE } from '../data/scenario';
-import { layoutTree } from '../lib/layout';
-import { pct } from '../lib/modes';
-import { useStore } from '../lib/store';
+import { HOST_HISTORY, PAST_TREES } from '../../../data/forest';
+import { LIVE_TREE } from '../../../data/scenario';
+import { layoutTree } from '../../../lib/layout';
+import { pct } from '../../../lib/modes';
+import { useStore } from '../../../lib/store';
 import { ArborLogo, Glyph } from './Glyph';
 
 /** A minimal stand-in for the browser, so the overlay clearly reads as an extension. */

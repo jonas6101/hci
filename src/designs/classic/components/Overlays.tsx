@@ -1,6 +1,6 @@
 import { ArrowRight, Trees } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useStore } from '../lib/store';
+import { useStore } from '../../../lib/store';
 import { ArborLogo, Glyph } from './Glyph';
 
 const STEPS = [

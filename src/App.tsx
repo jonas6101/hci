@@ -1,40 +1,32 @@
-import { useEffect } from 'react';
-import { ChatView } from './components/Chat';
-import { Forest } from './components/Forest';
-import { BrowserChrome, HostSidebar } from './components/Host';
-import { Onboarding, Toast } from './components/Overlays';
-import { ArborPanel } from './components/Panel';
+import { lazy, Suspense } from 'react';
 import { StoreProvider, useStore } from './lib/store';
+import type { Design } from './lib/types';
 
-function Shell() {
+/**
+ * Arbor comes in several design styles that share one store (conversation, classifier,
+ * scripted assistant). Each design is its own UI under src/designs/ and loads lazily,
+ * so only its own CSS is on the page. Switch with ?design=ascii|classic or in settings;
+ * the conversation carries over, which makes side-by-side comparisons in user tests easy.
+ */
+const DESIGNS: Record<Design, React.LazyExoticComponent<() => React.JSX.Element>> = {
+  ascii: lazy(() => import('./designs/ascii/App')),
+  classic: lazy(() => import('./designs/classic/App')),
+};
+
+function DesignSwitch() {
   const { state } = useStore();
-  const { theme } = state.settings;
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'system') delete root.dataset.theme;
-    else root.dataset.theme = theme;
-  }, [theme]);
-
+  const Design = DESIGNS[state.settings.design] ?? DESIGNS.ascii;
   return (
-    <div className="app">
-      <BrowserChrome />
-      <div className="viewport">
-        <HostSidebar />
-        <ChatView />
-        {state.panelOpen && <ArborPanel />}
-        {state.forest.open && <Forest />}
-      </div>
-      <Onboarding />
-      <Toast />
-    </div>
+    <Suspense fallback={null}>
+      <Design />
+    </Suspense>
   );
 }
 
 export default function App() {
   return (
     <StoreProvider>
-      <Shell />
+      <DesignSwitch />
     </StoreProvider>
   );
 }

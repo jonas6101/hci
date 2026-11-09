@@ -1,5 +1,5 @@
-import { MODE_SCORE } from '../lib/modes';
-import type { Mode } from '../lib/types';
+import { MODE_SCORE } from '../../../lib/modes';
+import type { Mode } from '../../../lib/types';
 
 /**
  * The one visual token for "who did the thinking":

@@ -1,12 +1,12 @@
 import { Info, Pause, Play, RotateCcw, Settings as SettingsIcon, Trees, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { layoutTree, type PlacedBranch, type PlacedLeaf } from '../lib/layout';
-import { useDismiss, useSize } from '../lib/hooks';
-import { MODE_META, MODE_SCORE, mean, pct, scoreToMode } from '../lib/modes';
-import { useStore, type State } from '../lib/store';
-import type { NudgeLevel, Theme } from '../lib/types';
+import { useDismiss } from '../../../lib/hooks';
+import { MODE_META, MODE_SCORE, mean, pct } from '../../../lib/modes';
+import { useStore, type State } from '../../../lib/store';
+import type { Design, Mode, NudgeLevel, Theme } from '../../../lib/types';
+import { AsciiTreeView } from '../../../shared/AsciiTreeView';
 import { ArborLogo, Glyph } from './Glyph';
-import { TreeSvg, type LeafEvent } from './TreeSvg';
+import { Squirrel, type SquirrelPose } from './Squirrel';
 
 export function ArborPanel() {
   const { state, dispatch, liveTree } = useStore();
@@ -30,7 +30,7 @@ export function ArborPanel() {
 
       {!enabled ? (
         <div className="panel-paused">
-          <Pause size={22} />
+          {state.settings.mascot ? <Squirrel pose="sleep" size={64} /> : <Pause size={22} />}
           <h3>Arbor is paused</h3>
           <p>The chat now looks exactly as it would without the extension. Nothing is labelled or collected.</p>
           <button className="btn btn-you" onClick={() => dispatch({ type: 'settings', patch: { enabled: true } })}>
@@ -123,47 +123,73 @@ function Balance() {
           ))}
         </div>
       )}
-      <p className="insight">{insightFor(state)}</p>
+      {state.settings.mascot ? <Mascot insight={insightFor(state)} /> : <p className="insight">{insightFor(state)}</p>}
     </section>
+  );
+}
+
+/* ───────────── Mascot ───────────── */
+
+/** While typing, the squirrel reads the composer's lens (feedforward), in the same words as the tags. */
+const LENS_LINE: Record<Mode, string> = {
+  own: 'You’re reasoning this one through yourself — its leaf will grow in filled.',
+  together: 'You’re exploring this with the AI — the leaf will be half yours.',
+  ai: 'This one hands the thinking to the AI. Totally fine — just good to know.',
+};
+const NUDGE_LINE = 'Before you send: what’s your hunch? A rough guess is plenty.';
+
+/** True for a moment after a new prompt labelled "your thinking" arrives. */
+function useCheer(count: number, lastMode: Mode | null) {
+  const [cheer, setCheer] = useState(false);
+  const prev = useRef(count);
+  useEffect(() => {
+    const grew = count > prev.current;
+    prev.current = count;
+    if (!grew || lastMode !== 'own') return;
+    setCheer(true);
+    const t = window.setTimeout(() => setCheer(false), 1500);
+    return () => {
+      clearTimeout(t);
+      setCheer(false);
+    };
+  }, [count, lastMode]);
+  return cheer;
+}
+
+/**
+ * The squirrel speaks the panel's insight and mirrors who is thinking: live while you type,
+ * otherwise the last prompt. Its acorn is the ●◑○ glyph, so it adds no new visual language.
+ */
+function Mascot({ insight }: { insight: string }) {
+  const { state } = useStore();
+  const { composer } = state;
+  const turns = state.messages.filter((m) => m.role === 'user' && m.classification);
+  const lastMode = turns.length ? turns[turns.length - 1].classification!.mode : null;
+  const cheer = useCheer(turns.length, lastMode);
+
+  const pose: SquirrelPose = composer.nudge ? 'nudge' : cheer ? 'cheer' : (composer.lens ?? lastMode ?? 'idle');
+  const [say, sayKey] = composer.nudge
+    ? [NUDGE_LINE, 'nudge']
+    : composer.lens
+      ? [LENS_LINE[composer.lens], `lens-${composer.lens}`]
+      : [insight, `insight-${turns.length}-${lastMode}`];
+
+  return (
+    <div className="mascot">
+      <p className="insight" key={sayKey}>
+        {say}
+      </p>
+      <Squirrel pose={pose} />
+    </div>
   );
 }
 
 /* ───────────── Live tree ───────────── */
 
-interface Tip {
-  x: number;
-  y: number;
-  leaf: PlacedLeaf;
-  branch: PlacedBranch;
-}
-
 function LiveTree() {
   const { state, dispatch, liveTree, jumpTo } = useStore();
   const wrap = useRef<HTMLDivElement>(null);
-  const { w } = useSize(wrap);
-  const layout = useMemo(() => layoutTree(liveTree), [liveTree]);
   const highlight = useMemo(() => new Set(state.highlight), [state.highlight]);
-  const [tip, setTip] = useState<Tip | null>(null);
-  const prevCount = useRef(layout.count);
-
-  const W = Math.max(w, 300);
-  const top = layout.top - 18;
-  const bottom = 56;
-  const height = bottom - top;
-
-  // Bring a newly sprouted leaf into view.
-  useEffect(() => {
-    if (layout.count > prevCount.current && wrap.current) {
-      const newest = Object.values(state.concepts).sort((a, b) => b.order - a.order)[0];
-      const b = layout.branches.find((br) => br.leaves.some((l) => l.id === newest?.id));
-      const l = b?.leaves.find((x) => x.id === newest?.id);
-      if (b && l) {
-        const y = b.base + l.y - top;
-        wrap.current.scrollTo({ top: Math.max(0, y - wrap.current.clientHeight / 2), behavior: 'smooth' });
-      }
-    }
-    prevCount.current = layout.count;
-  }, [layout, state.concepts, top]);
 
   // Semantic zoom: pinching out on the tree zooms out to the forest.
   useEffect(() => {
@@ -179,67 +205,14 @@ function LiveTree() {
     return () => el.removeEventListener('wheel', onWheel);
   }, [dispatch]);
 
-  const onEnter = ({ leaf, branch, event }: LeafEvent) => {
-    const r = (event.currentTarget.querySelector('.sprout') as Element).getBoundingClientRect();
-    const x = Math.min(window.innerWidth - 135, Math.max(135, r.left + r.width / 2));
-    setTip({ x, y: r.top, leaf, branch });
-    dispatch({ type: 'highlight', ids: [leaf.id] });
-  };
-  const onLeave = () => {
-    setTip(null);
-    dispatch({ type: 'highlight', ids: [] });
-  };
-
   return (
     <div className="live-tree" ref={wrap}>
-      {layout.branches.length === 0 ? (
-        <div className="tree-empty">
-          <svg width="80" height="70" viewBox="-40 -60 80 70" aria-hidden="true">
-            <path d="M0,0 L0,-30" className="limb" />
-            <path d="M0,-18 C-8,-26 -16,-26 -20,-22 C-14,-16 -6,-14 0,-18" className="seed-leaf" />
-            <path d="M0,-26 C8,-36 18,-36 22,-31 C14,-24 6,-22 0,-26" className="seed-leaf" />
-            <line x1="-30" x2="30" y1="0" y2="0" className="ground" />
-          </svg>
-          <p>Your tree grows as you explore topics in this chat.</p>
-        </div>
-      ) : (
-        <svg
-          className="tree-svg"
-          width={W}
-          height={height}
-          viewBox={`${-W / 2} ${top} ${W} ${height}`}
-          role="img"
-          aria-label={`Knowledge tree for ${liveTree.title}: ${layout.count} concepts, ${pct(layout.score)}% your thinking`}
-        >
-          <line className="ground" x1={-80} x2={80} y1={0} y2={0} />
-          <TreeSvg
-            layout={layout}
-            showLabels
-            labelRoom={W / 2}
-            highlight={highlight}
-            onLeafEnter={onEnter}
-            onLeafLeave={onLeave}
-            onLeafClick={({ leaf }) => leaf.messageId && jumpTo(leaf.messageId)}
-          />
-          <text className="root-title" x={0} y={24} textAnchor="middle">
-            {liveTree.title}
-          </text>
-          <text className="root-meta" x={0} y={40} textAnchor="middle">
-            {layout.count} concepts · {pct(layout.score)}% your thinking
-          </text>
-        </svg>
-      )}
-      {tip && (
-        <div className="tooltip" style={{ left: tip.x, top: tip.y }} role="tooltip">
-          <strong>{tip.leaf.label}</strong>
-          <span className="tip-mode">
-            <Glyph score={tip.leaf.score} size={11} /> {MODE_META[scoreToMode(tip.leaf.score)].label}
-          </span>
-          <span className="tip-meta">
-            {tip.branch.label} · {tip.leaf.count ?? 1} message{(tip.leaf.count ?? 1) === 1 ? '' : 's'} · click to jump
-          </span>
-        </div>
-      )}
+      <AsciiTreeView
+        tree={liveTree}
+        highlight={highlight}
+        onHover={(id) => dispatch({ type: 'highlight', ids: id ? [id] : [] })}
+        onJump={jumpTo}
+      />
     </div>
   );
 }
@@ -270,6 +243,10 @@ const NUDGE_OPTS: { v: NudgeLevel; label: string; desc: string }[] = [
   { v: 'off', label: 'Off', desc: 'No labels while typing, no interruptions.' },
   { v: 'gentle', label: 'Gentle', desc: 'A live label while you type. Never interrupts.' },
   { v: 'active', label: 'Active', desc: 'Before you delegate, Arbor offers to add your own take first.' },
+];
+const DESIGN_OPTS: { v: Design; label: string }[] = [
+  { v: 'classic', label: 'Classic' },
+  { v: 'ascii', label: 'ASCII' },
 ];
 const THEME_OPTS: { v: Theme; label: string }[] = [
   { v: 'system', label: 'System' },
@@ -305,11 +282,24 @@ function SettingsMenu({ open, setOpen }: { open: boolean; setOpen: (o: boolean) 
             <span>Label my messages</span>
             <input type="checkbox" checked={s.showTags} onChange={(e) => set({ showTags: e.target.checked })} />
           </label>
+          <label className="toggle-row">
+            <span>Show squirrel</span>
+            <input type="checkbox" checked={s.mascot} onChange={(e) => set({ mascot: e.target.checked })} />
+          </label>
 
           <p className="pop-sub">Theme</p>
           <div className="segmented" role="radiogroup" aria-label="Theme">
             {THEME_OPTS.map((o) => (
               <button key={o.v} role="radio" aria-checked={s.theme === o.v} className={s.theme === o.v ? 'on' : ''} onClick={() => set({ theme: o.v })}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="pop-sub">Design</p>
+          <div className="segmented" role="radiogroup" aria-label="Design style">
+            {DESIGN_OPTS.map((o) => (
+              <button key={o.v} role="radio" aria-checked={s.design === o.v} className={s.design === o.v ? 'on' : ''} onClick={() => set({ design: o.v })}>
                 {o.label}
               </button>
             ))}
