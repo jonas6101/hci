@@ -1888,6 +1888,85 @@ kbd {
   }
 }
 
+/* Poking the squirrel: on hover it notices you (tail swish, blink); on click it tosses its acorn
+   and hops; poke it a lot and it wobbles, dizzy. Each plays once, never on a loop. */
+.sq-btn {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.sq-tail {
+  transform-origin: 31px 43px;
+}
+.sq-eye {
+  transform-origin: 15px 16.2px;
+}
+.sq-acorn {
+  transform-origin: 12.6px 31.4px;
+}
+.sq-btn:hover .sq-tail {
+  animation: sq-swish 0.7s var(--ease);
+}
+.sq-btn:hover .pose-idle .sq-eye,
+.sq-btn:hover .pose-own .sq-eye,
+.sq-btn:hover .pose-together .sq-eye,
+.sq-btn:hover .pose-ai .sq-eye,
+.sq-btn:hover .pose-nudge .sq-eye {
+  animation: sq-blink 0.3s 0.2s;
+}
+.squirrel.is-toss .sq-body {
+  animation: sq-hop 0.6s var(--ease);
+}
+.squirrel.is-toss .sq-acorn {
+  animation: sq-toss 0.75s cubic-bezier(0.3, 0.1, 0.3, 1);
+}
+.squirrel.is-dizzy .sq-body {
+  animation: sq-wobble 0.9s ease-in-out;
+}
+.insight.is-tip {
+  color: var(--text);
+}
+@keyframes sq-swish {
+  30% {
+    transform: rotate(-9deg);
+  }
+  65% {
+    transform: rotate(5deg);
+  }
+}
+@keyframes sq-blink {
+  50% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes sq-toss {
+  45% {
+    transform: translateY(-15px) rotate(200deg);
+  }
+  80% {
+    transform: translateY(1px) rotate(350deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes sq-wobble {
+  20% {
+    transform: rotate(-8deg);
+  }
+  40% {
+    transform: rotate(6deg);
+  }
+  60% {
+    transform: rotate(-4deg);
+  }
+  80% {
+    transform: rotate(2deg);
+  }
+}
+
 /* ───────────────────────── Motion ───────────────────────── */
 @keyframes rise {
   from {

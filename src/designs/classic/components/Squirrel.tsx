@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { Mode } from '../../../lib/types';
 
 /**
@@ -9,7 +10,9 @@ import type { Mode } from '../../../lib/types';
  *   nudge    — lifts the hollow acorn: "what's your hunch?"
  *   cheer    — one small hop (you just added your own thinking)
  *   sleep    — Arbor is paused: eye closed
- * It only moves when its pose changes, never on a loop, so it stays calm in the periphery.
+ * On its own it only moves when its pose changes, never on a loop, so it stays calm in the periphery.
+ * When interactive (onPoke) it answers to you: on hover it notices you (tail swish, blink), on
+ * click it tosses its acorn and hops, and if you click it a lot it gets dizzy.
  * Styles live in the "Mascot" section of styles.css.
  */
 export type SquirrelPose = 'idle' | 'own' | 'together' | 'ai' | 'nudge' | 'cheer' | 'sleep';
@@ -29,11 +32,39 @@ const CX = 12.6;
 const CY = 31.4;
 const R = 4.6;
 
-export function Squirrel({ pose, size = 44 }: { pose: SquirrelPose; size?: number }) {
+const DIZZY_CLICKS = 4;
+const DIZZY_WINDOW = 1600;
+
+export function Squirrel({ pose, size = 44, onPoke }: { pose: SquirrelPose; size?: number; onPoke?: (dizzy: boolean) => void }) {
   const acorn = ACORN[pose];
-  return (
+  const [look, setLook] = useState<'toss' | 'dizzy' | null>(null);
+  const [n, setN] = useState(0);
+  const clicks = useRef<number[]>([]);
+  const settle = useRef(0);
+  const recovering = useRef(false);
+  useEffect(() => () => clearTimeout(settle.current), []);
+
+  const poke = () => {
+    if (!onPoke || recovering.current) return; // give it a second when it's dizzy
+    const now = performance.now();
+    clicks.current = [...clicks.current.filter((t) => now - t < DIZZY_WINDOW), now];
+    const dizzy = clicks.current.length >= DIZZY_CLICKS;
+    if (dizzy) clicks.current = [];
+    recovering.current = dizzy;
+    setN((x) => x + 1);
+    setLook(dizzy ? 'dizzy' : 'toss');
+    clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => {
+      setLook(null);
+      recovering.current = false;
+    }, dizzy ? 1300 : 800);
+    onPoke(dizzy);
+  };
+
+  const svg = (
     <svg
-      className={`squirrel pose-${pose}${acorn ? ` acorn-${acorn}` : ''}`}
+      key={n}
+      className={`squirrel pose-${pose}${acorn ? ` acorn-${acorn}` : ''}${look ? ` is-${look}` : ''}`}
       width={size}
       height={size}
       viewBox="0 0 48 48"
@@ -52,10 +83,12 @@ export function Squirrel({ pose, size = 44 }: { pose: SquirrelPose; size?: numbe
         <path className="sq-eye-closed" d="M13.5 16Q15 17.5 16.5 16" />
 
         <g className="sq-hold">
-          <circle className="sq-gap" cx={CX} cy={CY} r={R + 1.5} />
-          <circle className="sq-nut" cx={CX} cy={CY} r={R} />
-          <circle className="sq-nut-full" cx={CX} cy={CY} r={R} />
-          <path className="sq-nut-half" d={`M${CX} ${CY - R}A${R} ${R} 0 0 1 ${CX} ${CY + R}Z`} />
+          <g className="sq-acorn">
+            <circle className="sq-gap" cx={CX} cy={CY} r={R + 1.5} />
+            <circle className="sq-nut" cx={CX} cy={CY} r={R} />
+            <circle className="sq-nut-full" cx={CX} cy={CY} r={R} />
+            <path className="sq-nut-half" d={`M${CX} ${CY - R}A${R} ${R} 0 0 1 ${CX} ${CY + R}Z`} />
+          </g>
           <path className="sq-arm" d="M8.6 27Q12.6 24.8 16.6 27" />
         </g>
       </g>
@@ -65,5 +98,11 @@ export function Squirrel({ pose, size = 44 }: { pose: SquirrelPose; size?: numbe
         <text x="1" y="4" fontSize="8">z</text>
       </g>
     </svg>
+  );
+  if (!onPoke) return svg;
+  return (
+    <button className="sq-btn" onClick={poke} aria-label="Ask the squirrel" title="Poke me">
+      {svg}
+    </button>
   );
 }

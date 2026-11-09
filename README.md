@@ -14,7 +14,7 @@ Arbor comes in several design styles that share one core: the conversation, the 
 | Style | What it is |
 |---|---|
 | **ascii** (default) | Everything on one character grid, in one monospace voice. Minimal chrome, keyboard first, and a set of interaction concepts built for the medium (see below). |
-| **classic** | The original UI: a mock browser with a chat app and the Arbor side panel, with the zoomable SVG forest. |
+| **classic** | The first iteration: a mock browser with a chat app and the Arbor side panel, an SVG tree with hover tooltips, and the zoomable SVG forest. It has the newer additions too: the squirrel, which you can hover and poke for tips like in the ASCII style. |
 
 To add a style, create `src/designs/<name>/App.tsx` (default export, reads `useStore()`), add it to `DESIGNS` in `src/App.tsx` and to the `Design` type in `src/lib/types.ts`. Prefix its CSS classes so styles never collide.
 
@@ -148,7 +148,7 @@ src/
     scenario.ts           live conversation script
     forest.ts             past trees
   shared/
-    AsciiTreeView.tsx     the animated ASCII tree (used by both designs)
+    AsciiTreeView.tsx     the animated ASCII tree (ASCII style; kept here so other styles can reuse it)
   designs/
     ascii/
       App.tsx             layout, global keys, browser line, toast

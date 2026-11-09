@@ -1,12 +1,14 @@
 import { Info, Pause, Play, RotateCcw, Settings as SettingsIcon, Trees, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useDismiss } from '../../../lib/hooks';
-import { MODE_META, MODE_SCORE, mean, pct } from '../../../lib/modes';
+import { useDismiss, useSize } from '../../../lib/hooks';
+import { layoutTree, type PlacedBranch, type PlacedLeaf } from '../../../lib/layout';
+import { MODE_META, MODE_SCORE, mean, pct, scoreToMode } from '../../../lib/modes';
+import { CONCEPT_BY_ID } from '../../../data/scenario';
 import { useStore, type State } from '../../../lib/store';
 import type { Design, Mode, NudgeLevel, Theme } from '../../../lib/types';
-import { AsciiTreeView } from '../../../shared/AsciiTreeView';
 import { ArborLogo, Glyph } from './Glyph';
 import { Squirrel, type SquirrelPose } from './Squirrel';
+import { TreeSvg, type LeafEvent } from './TreeSvg';
 
 export function ArborPanel() {
   const { state, dispatch, liveTree } = useStore();
@@ -160,6 +162,34 @@ function useCheer(count: number, lastMode: Mode | null) {
  * The squirrel speaks the panel's insight and mirrors who is thinking: live while you type,
  * otherwise the last prompt. Its acorn is the ●◑○ glyph, so it adds no new visual language.
  */
+interface SquirrelTip {
+  text: string;
+  action?: { label: string; run: () => void };
+}
+
+/** Poking the squirrel cycles through things worth doing right now. */
+function useSquirrelTips(): SquirrelTip[] {
+  const { state, dispatch, liveTree, send } = useStore();
+  const leaves = liveTree.branches.flatMap((b) => b.leaves);
+  const weakest = [...leaves].filter((l) => CONCEPT_BY_ID[l.id]).sort((a, b) => a.score - b.score)[0];
+  const tips: SquirrelTip[] = [];
+  if (weakest && weakest.score < 1) {
+    tips.push({
+      text: `“${weakest.label}” is ${weakest.score === 0 ? 'still all the AI’s' : 'only half yours'}. Want me to quiz you on it?`,
+      action: state.busy ? undefined : { label: 'Quiz me', run: () => send(`Quiz me on ${weakest.label.toLowerCase()}`) },
+    });
+  } else if (leaves.length) {
+    tips.push({ text: 'Every leaf on this tree is yours. I’m impressed.' });
+  }
+  tips.push({
+    text: 'Every chat you have grows a tree. Pinch out on this one to see the forest.',
+    action: { label: 'Open the forest', run: () => dispatch({ type: 'forest', open: true }) },
+  });
+  return tips;
+}
+
+const DIZZY_LINE = 'Whoa. Okay. Okay. I’m dizzy.';
+
 function Mascot({ insight }: { insight: string }) {
   const { state } = useStore();
   const { composer } = state;
@@ -174,22 +204,79 @@ function Mascot({ insight }: { insight: string }) {
       ? [LENS_LINE[composer.lens], `lens-${composer.lens}`]
       : [insight, `insight-${turns.length}-${lastMode}`];
 
+  // A tip holds the floor until something new happens, or for a while.
+  const tips = useSquirrelTips();
+  const [tip, setTip] = useState<{ i: number; n: number } | null>(null);
+  useEffect(() => setTip(null), [sayKey]);
+  useEffect(() => {
+    if (!tip) return;
+    const t = window.setTimeout(() => setTip(null), 10000);
+    return () => clearTimeout(t);
+  }, [tip]);
+  const poke = (dizzy: boolean) =>
+    setTip((t) => ({ i: dizzy ? -1 : t && t.i >= 0 ? (t.i + 1) % tips.length : 0, n: (t?.n ?? 0) + 1 }));
+  const shown = tip ? (tip.i < 0 ? { text: DIZZY_LINE } : tips[Math.min(tip.i, tips.length - 1)]) : null;
+
   return (
     <div className="mascot">
-      <p className="insight" key={sayKey}>
-        {say}
+      <p className={`insight${shown ? ' is-tip' : ''}`} key={shown ? `tip-${tip!.n}` : sayKey} aria-live="polite">
+        {shown ? shown.text : say}
+        {shown?.action && (
+          <>
+            {' '}
+            <button
+              className="link"
+              onClick={() => {
+                shown.action!.run();
+                setTip(null);
+              }}
+            >
+              {shown.action.label}
+            </button>
+          </>
+        )}
       </p>
-      <Squirrel pose={pose} />
+      <Squirrel pose={pose} onPoke={poke} />
     </div>
   );
 }
 
 /* ───────────── Live tree ───────────── */
 
+interface Tip {
+  x: number;
+  y: number;
+  leaf: PlacedLeaf;
+  branch: PlacedBranch;
+}
+
 function LiveTree() {
   const { state, dispatch, liveTree, jumpTo } = useStore();
   const wrap = useRef<HTMLDivElement>(null);
+  const { w } = useSize(wrap);
+  const layout = useMemo(() => layoutTree(liveTree), [liveTree]);
   const highlight = useMemo(() => new Set(state.highlight), [state.highlight]);
+  const [tip, setTip] = useState<Tip | null>(null);
+  const prevCount = useRef(layout.count);
+
+  const W = Math.max(w, 300);
+  const top = layout.top - 18;
+  const bottom = 56;
+  const height = bottom - top;
+
+  // Bring a newly sprouted leaf into view.
+  useEffect(() => {
+    if (layout.count > prevCount.current && wrap.current) {
+      const newest = Object.values(state.concepts).sort((a, b) => b.order - a.order)[0];
+      const b = layout.branches.find((br) => br.leaves.some((l) => l.id === newest?.id));
+      const l = b?.leaves.find((x) => x.id === newest?.id);
+      if (b && l) {
+        const y = b.base + l.y - top;
+        wrap.current.scrollTo({ top: Math.max(0, y - wrap.current.clientHeight / 2), behavior: 'smooth' });
+      }
+    }
+    prevCount.current = layout.count;
+  }, [layout, state.concepts, top]);
 
   // Semantic zoom: pinching out on the tree zooms out to the forest.
   useEffect(() => {
@@ -205,14 +292,67 @@ function LiveTree() {
     return () => el.removeEventListener('wheel', onWheel);
   }, [dispatch]);
 
+  const onEnter = ({ leaf, branch, event }: LeafEvent) => {
+    const r = (event.currentTarget.querySelector('.sprout') as Element).getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 135, Math.max(135, r.left + r.width / 2));
+    setTip({ x, y: r.top, leaf, branch });
+    dispatch({ type: 'highlight', ids: [leaf.id] });
+  };
+  const onLeave = () => {
+    setTip(null);
+    dispatch({ type: 'highlight', ids: [] });
+  };
+
   return (
     <div className="live-tree" ref={wrap}>
-      <AsciiTreeView
-        tree={liveTree}
-        highlight={highlight}
-        onHover={(id) => dispatch({ type: 'highlight', ids: id ? [id] : [] })}
-        onJump={jumpTo}
-      />
+      {layout.branches.length === 0 ? (
+        <div className="tree-empty">
+          <svg width="80" height="70" viewBox="-40 -60 80 70" aria-hidden="true">
+            <path d="M0,0 L0,-30" className="limb" />
+            <path d="M0,-18 C-8,-26 -16,-26 -20,-22 C-14,-16 -6,-14 0,-18" className="seed-leaf" />
+            <path d="M0,-26 C8,-36 18,-36 22,-31 C14,-24 6,-22 0,-26" className="seed-leaf" />
+            <line x1="-30" x2="30" y1="0" y2="0" className="ground" />
+          </svg>
+          <p>Your tree grows as you explore topics in this chat.</p>
+        </div>
+      ) : (
+        <svg
+          className="tree-svg"
+          width={W}
+          height={height}
+          viewBox={`${-W / 2} ${top} ${W} ${height}`}
+          role="img"
+          aria-label={`Knowledge tree for ${liveTree.title}: ${layout.count} concepts, ${pct(layout.score)}% your thinking`}
+        >
+          <line className="ground" x1={-80} x2={80} y1={0} y2={0} />
+          <TreeSvg
+            layout={layout}
+            showLabels
+            labelRoom={W / 2}
+            highlight={highlight}
+            onLeafEnter={onEnter}
+            onLeafLeave={onLeave}
+            onLeafClick={({ leaf }) => leaf.messageId && jumpTo(leaf.messageId)}
+          />
+          <text className="root-title" x={0} y={24} textAnchor="middle">
+            {liveTree.title}
+          </text>
+          <text className="root-meta" x={0} y={40} textAnchor="middle">
+            {layout.count} concepts · {pct(layout.score)}% your thinking
+          </text>
+        </svg>
+      )}
+      {tip && (
+        <div className="tooltip" style={{ left: tip.x, top: tip.y }} role="tooltip">
+          <strong>{tip.leaf.label}</strong>
+          <span className="tip-mode">
+            <Glyph score={tip.leaf.score} size={11} /> {MODE_META[scoreToMode(tip.leaf.score)].label}
+          </span>
+          <span className="tip-meta">
+            {tip.branch.label} · {tip.leaf.count ?? 1} message{(tip.leaf.count ?? 1) === 1 ? '' : 's'} · click to jump
+          </span>
+        </div>
+      )}
     </div>
   );
 }
