@@ -1,13 +1,13 @@
 import { ArrowLeft, ChevronRight, Lightbulb, Maximize, MessageSquare, Minus, Plus, Search, Trees, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GROVES, GROVE_ROWS, PAST_TREES } from '../data/forest';
-import { LIVE_TREE } from '../data/scenario';
-import { fitTarget, useCamera } from '../lib/camera';
-import { useSize } from '../lib/hooks';
-import { GROUND_DEPTH, groveBounds, layoutForest, treeBounds, type ForestLayout, type PlacedTree } from '../lib/layout';
-import { mean, pct } from '../lib/modes';
-import { useStore } from '../lib/store';
-import { fitText, measure } from '../lib/text';
+import { GROVES, GROVE_ROWS, PAST_TREES } from '../../../data/forest';
+import { LIVE_TREE } from '../../../data/scenario';
+import { fitTarget, useCamera } from '../../../lib/camera';
+import { useSize } from '../../../lib/hooks';
+import { GROUND_DEPTH, groveBounds, layoutForest, treeBounds, type ForestLayout, type PlacedTree } from '../../../lib/layout';
+import { mean, pct } from '../../../lib/modes';
+import { useStore } from '../../../lib/store';
+import { fitText, measure } from '../../../lib/text';
 import { Glyph } from './Glyph';
 import { TreeSvg } from './TreeSvg';
 

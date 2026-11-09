@@ -1,0 +1,379 @@
+/* ───────────────────────── ASCII tree ─────────────────────────
+ * One positioned element per character (AsciiTreeView.tsx, layout in lib/asciiTree.ts).
+ * Growth animations use transform/opacity with backwards fill; hover, cursor and wind use the
+ * separate scale/translate/rotate properties, so they never restart the growth.
+ */
+.at-wrap {
+  --at-lh: 18px;
+  position: relative;
+  margin-top: auto;
+  padding: 12px 16px 18px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: var(--at-lh);
+}
+.at-probe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+}
+.at-grid {
+  position: relative;
+  margin: 0 auto;
+  white-space: pre;
+}
+.at-w,
+.at-node,
+.at-title,
+.at-meta,
+.at-sparks,
+.at-card {
+  position: absolute;
+}
+
+/* Wood */
+.at-w {
+  width: 1ch;
+  text-align: center;
+  color: color-mix(in srgb, var(--bark-strong), var(--text) calc(var(--near, 0) * 75%));
+  transform-origin: 50% 100%;
+  animation: at-grow 0.32s var(--ease) backwards;
+  transition:
+    left 0.6s var(--ease),
+    top 0.6s var(--ease),
+    color 0.25s,
+    opacity 0.3s,
+    translate 0.18s ease-out;
+}
+.at-w.k-ground,
+.at-w.k-root {
+  color: color-mix(in srgb, var(--bark), var(--text) calc(var(--near, 0) * 60%));
+}
+/* Sap: the path from a node to the roots lights up, flowing downwards */
+.at-w.lit {
+  color: var(--lit);
+  font-weight: 700;
+  transition-delay: 0s, 0s, calc(var(--d) * 26ms), 0s, 0s;
+}
+.at-grid.focusing .at-w:not(.lit) {
+  opacity: 0.22;
+}
+.at-grid.focusing .at-node:not(.rel) {
+  opacity: 0.3;
+}
+.at-grid.focusing .at-title,
+.at-grid.focusing .at-meta {
+  opacity: 0.5;
+}
+
+/* Leaves and branch nodes */
+.at-node {
+  display: block;
+  height: var(--at-lh);
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  line-height: var(--at-lh);
+  color: var(--text);
+  white-space: pre;
+  cursor: pointer;
+  transition:
+    left 0.6s var(--ease),
+    top 0.6s var(--ease),
+    opacity 0.3s;
+}
+.at-node.k-branch {
+  font-weight: 650;
+  cursor: default;
+}
+.at-node:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.at-label > span {
+  animation: at-type 0.08s linear backwards;
+}
+.at-node.is-hover .at-label,
+.at-node.is-hl .at-label {
+  font-weight: 700;
+}
+.at-node.k-leaf.is-hover .at-label {
+  text-decoration: underline;
+  text-decoration-color: var(--lit);
+  text-underline-offset: 3px;
+}
+.at-glyph {
+  position: relative;
+  display: inline-block;
+  width: 1ch;
+  height: var(--at-lh);
+  vertical-align: top;
+  animation: at-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) backwards;
+  transition:
+    scale 0.35s cubic-bezier(0.3, 1.7, 0.5, 1),
+    translate 1.1s cubic-bezier(0.55, 0, 0.8, 0.4),
+    rotate 1.1s ease-in,
+    opacity 0.6s;
+}
+/* Fading (with a retention model): the glyph pales, and a forgotten leaf falls to the ground */
+.at-glyph.fading {
+  opacity: 0.55;
+}
+.at-glyph.fallen {
+  translate: 0 var(--fall);
+  rotate: var(--spin);
+  opacity: 0.45;
+  transition:
+    scale 0.35s cubic-bezier(0.3, 1.7, 0.5, 1),
+    translate 1.1s cubic-bezier(0.5, 0, 0.9, 0.5),
+    rotate 1.1s ease-in,
+    opacity 0.6s;
+}
+.at-label > span.er {
+  color: var(--text-3);
+  opacity: 0.5;
+}
+.at-wrap.is-outline {
+  margin-top: 0;
+}
+.at-glyph svg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.2ch;
+  height: 1.2ch;
+  translate: -50% -50%;
+  overflow: visible;
+}
+.at-ring {
+  fill: var(--surface);
+  stroke-width: 1.5;
+  transition: stroke 0.4s;
+}
+.at-ring.is-you {
+  stroke: var(--you);
+}
+.at-ring.is-ai {
+  stroke: var(--ai);
+}
+.at-fill {
+  fill: none;
+  stroke: var(--you);
+  transition: stroke-dasharray 0.8s var(--ease);
+}
+/* Hover: the node springs up and sends out a ping */
+.at-node.is-hover .at-glyph,
+.at-node.is-hl .at-glyph {
+  scale: 1.65;
+}
+.at-node.is-hover .at-glyph::after,
+.at-node.is-hl .at-glyph::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.2ch;
+  height: 1.2ch;
+  margin: -0.6ch 0 0 -0.6ch;
+  border: 1px solid var(--lit);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: at-ping 0.75s var(--ease) both;
+}
+.at-node.is-hl:not(.is-hover) .at-glyph::after {
+  animation-iteration-count: 2;
+}
+
+/* Root title (types itself, with a caret) and the numbers under it */
+.at-title {
+  font-weight: 650;
+  color: var(--text);
+  white-space: pre;
+  transition:
+    left 0.6s var(--ease),
+    top 0.6s var(--ease),
+    opacity 0.3s;
+}
+.at-title > span:not(.at-cursor) {
+  animation: at-type 0.08s linear backwards;
+}
+.at-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--you);
+  font-weight: 400;
+  animation:
+    at-caret var(--dur) steps(var(--len), end) both,
+    at-blink 0.9s steps(1) var(--dur) 4 both;
+}
+.at-meta {
+  color: var(--text-3);
+  white-space: pre;
+  animation: at-fade 0.5s var(--ease) backwards;
+  transition:
+    left 0.6s var(--ease),
+    top 0.6s var(--ease),
+    opacity 0.3s;
+}
+
+/* Sprouts and fills burst into sparks */
+.at-sparks {
+  width: 1ch;
+  height: var(--at-lh);
+  pointer-events: none;
+}
+.at-sparks > span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1ch;
+  text-align: center;
+  font-weight: 700;
+  animation: at-spark 0.85s var(--ease) both;
+}
+
+/* Hover card: box-drawn, unfolds from the corner nearest the node */
+.at-card {
+  z-index: 3;
+  white-space: pre;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  animation: at-unfold 0.3s var(--ease) both;
+}
+.at-card-line {
+  height: var(--at-lh);
+}
+.at-card-line.is-body {
+  animation: at-line 0.22s var(--ease) both;
+  animation-delay: calc(140ms + var(--i) * 55ms);
+}
+.at-card-b {
+  color: var(--lit);
+}
+.at-card strong {
+  font-weight: 700;
+}
+
+/* Empty: a seedling */
+.at-wrap.at-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--text-3);
+}
+.at-seed {
+  display: inline-block;
+  margin: 0 0 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--bark-strong);
+  transform-origin: 50% 100%;
+  animation: at-seedling 5s ease-in-out infinite;
+}
+.at-empty p {
+  margin: 0 auto;
+  max-width: 220px;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+@keyframes at-grow {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.4);
+  }
+}
+@keyframes at-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.6);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes at-type {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes at-fade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+@keyframes at-ping {
+  from {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@keyframes at-caret {
+  from {
+    left: 0;
+  }
+  to {
+    left: calc(var(--len) * 1ch);
+  }
+}
+@keyframes at-blink {
+  0% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes at-spark {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(1.1) rotate(40deg);
+  }
+}
+@keyframes at-unfold {
+  from {
+    clip-path: var(--from);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes at-line {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+@keyframes at-seedling {
+  0%,
+  100% {
+    rotate: 0deg;
+  }
+  50% {
+    rotate: 2.5deg;
+  }
+}
+

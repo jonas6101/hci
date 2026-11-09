@@ -1,6 +1,6 @@
 import { memo, type MouseEvent } from 'react';
-import { G, type PlacedBranch, type PlacedLeaf, type TreeLayout } from '../lib/layout';
-import { BRANCH_FONT, LEAF_FONT, fitText } from '../lib/text';
+import { G, type PlacedBranch, type PlacedLeaf, type TreeLayout } from '../../../lib/layout';
+import { BRANCH_FONT, LEAF_FONT, fitText } from '../../../lib/text';
 
 /** Pie-filled node. Filled share = how much of the thinking was yours. */
 export function Node({ r, score }: { r: number; score: number }) {

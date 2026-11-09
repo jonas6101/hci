@@ -27,6 +27,7 @@
   --shadow-1: 0 1px 2px rgba(28, 24, 16, 0.06), 0 1px 1px rgba(28, 24, 16, 0.03);
   --shadow-2: 0 12px 32px rgba(28, 24, 16, 0.12), 0 2px 8px rgba(28, 24, 16, 0.06);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1754,6 +1755,216 @@ kbd {
 .toast.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/* ───────────────────────── Mascot (squirrel) ─────────────────────────
+ * A flat squirrel in the tree's bark colours that speaks the panel's insight.
+ * Only its acorn is coloured: the same ●◑○ glyph (filled = you, half = together, hollow = AI).
+ * It moves only when its pose changes, never on a loop, so it stays calm in the periphery.
+ */
+.mascot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.mascot .insight {
+  flex: 1;
+  margin: 0;
+  animation: say 0.3s var(--ease);
+}
+.squirrel {
+  flex: none;
+  overflow: visible;
+}
+.squirrel * {
+  transform-box: view-box;
+}
+.sq-tail {
+  fill: var(--bark);
+}
+.sq-fur {
+  fill: var(--bark-strong);
+}
+.sq-eye,
+.sq-gap {
+  fill: var(--surface);
+}
+.sq-eye-closed {
+  fill: none;
+  stroke: var(--surface);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  opacity: 0;
+}
+.sq-arm {
+  fill: none;
+  stroke: var(--bark-strong);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+/* The acorn: hollow by default, filled or half-filled like the glyph */
+.sq-nut {
+  fill: var(--surface);
+  stroke: var(--ai);
+  stroke-width: 1.5;
+  transition: stroke 0.3s;
+}
+.acorn-own .sq-nut,
+.acorn-together .sq-nut {
+  stroke: var(--you);
+}
+.sq-nut-full,
+.sq-nut-half {
+  fill: var(--you);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.acorn-own .sq-nut-full,
+.acorn-together .sq-nut-half {
+  opacity: 1;
+}
+
+/* Pose changes */
+.sq-body {
+  transform-origin: 28px 45px;
+}
+.sq-hold {
+  transform-origin: 14px 30px;
+  transition:
+    transform 0.4s var(--ease),
+    opacity 0.25s;
+}
+.pose-idle .sq-hold,
+.pose-sleep .sq-hold {
+  opacity: 0;
+  transform: scale(0.4);
+}
+/* nudge: lifts the hollow acorn towards you */
+.pose-nudge .sq-hold {
+  transform: translate(-1.5px, -4.5px) rotate(-10deg);
+}
+/* cheer: one hop, and the acorn pops */
+.pose-cheer .sq-body {
+  animation: sq-hop 0.6s var(--ease);
+}
+.pose-cheer .sq-hold {
+  animation: sq-pop 0.6s var(--ease);
+}
+/* sleep: Arbor is paused */
+.pose-sleep .sq-eye {
+  opacity: 0;
+}
+.pose-sleep .sq-eye-closed {
+  opacity: 1;
+}
+.sq-zzz text {
+  fill: var(--text-3);
+  font-weight: 650;
+  opacity: 0;
+}
+.pose-sleep .sq-zzz text {
+  opacity: 0.8;
+}
+
+@keyframes say {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+}
+@keyframes sq-hop {
+  35% {
+    transform: translateY(-5px) scale(0.97, 1.03);
+  }
+  70% {
+    transform: scale(1.03, 0.97);
+  }
+}
+@keyframes sq-pop {
+  40% {
+    transform: scale(1.18);
+  }
+}
+
+/* Poking the squirrel: on hover it notices you (tail swish, blink); on click it tosses its acorn
+   and hops; poke it a lot and it wobbles, dizzy. Each plays once, never on a loop. */
+.sq-btn {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.sq-tail {
+  transform-origin: 31px 43px;
+}
+.sq-eye {
+  transform-origin: 15px 16.2px;
+}
+.sq-acorn {
+  transform-origin: 12.6px 31.4px;
+}
+.sq-btn:hover .sq-tail {
+  animation: sq-swish 0.7s var(--ease);
+}
+.sq-btn:hover .pose-idle .sq-eye,
+.sq-btn:hover .pose-own .sq-eye,
+.sq-btn:hover .pose-together .sq-eye,
+.sq-btn:hover .pose-ai .sq-eye,
+.sq-btn:hover .pose-nudge .sq-eye {
+  animation: sq-blink 0.3s 0.2s;
+}
+.squirrel.is-toss .sq-body {
+  animation: sq-hop 0.6s var(--ease);
+}
+.squirrel.is-toss .sq-acorn {
+  animation: sq-toss 0.75s cubic-bezier(0.3, 0.1, 0.3, 1);
+}
+.squirrel.is-dizzy .sq-body {
+  animation: sq-wobble 0.9s ease-in-out;
+}
+.insight.is-tip {
+  color: var(--text);
+}
+@keyframes sq-swish {
+  30% {
+    transform: rotate(-9deg);
+  }
+  65% {
+    transform: rotate(5deg);
+  }
+}
+@keyframes sq-blink {
+  50% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes sq-toss {
+  45% {
+    transform: translateY(-15px) rotate(200deg);
+  }
+  80% {
+    transform: translateY(1px) rotate(350deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes sq-wobble {
+  20% {
+    transform: rotate(-8deg);
+  }
+  40% {
+    transform: rotate(6deg);
+  }
+  60% {
+    transform: rotate(-4deg);
+  }
+  80% {
+    transform: rotate(2deg);
+  }
 }
 
 /* ───────────────────────── Motion ───────────────────────── */

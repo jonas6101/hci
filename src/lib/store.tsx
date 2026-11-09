@@ -16,6 +16,8 @@ export interface State {
   /** Text pushed into the composer from elsewhere (nudges, "explain it back"…). */
   draft: { text: string; nonce: number };
   highlight: string[];
+  /** What the composer is showing right now, so the mascot can react while you type. */
+  composer: { lens: Mode | null; nudge: boolean };
   flash: { id: string; nonce: number } | null;
   onboarding: boolean;
   toast: { text: string; nonce: number } | null;
@@ -27,11 +29,13 @@ type Action =
   | { type: 'stream'; id: string; text: string }
   | { type: 'assistantDone'; id: string }
   | { type: 'reclassify'; id: string; mode: Mode }
+  | { type: 'reveal'; id: string; guess: string }
   | { type: 'settings'; patch: Partial<Settings> }
   | { type: 'panel'; open: boolean }
   | { type: 'forest'; open: boolean; focus?: string | null }
   | { type: 'draft'; text: string }
   | { type: 'highlight'; ids: string[] }
+  | { type: 'composer'; lens: Mode | null; nudge: boolean }
   | { type: 'flash'; id: string }
   | { type: 'onboarding'; open: boolean }
   | { type: 'toast'; text: string }
@@ -80,7 +84,7 @@ const SETTINGS_KEY = 'arbor.settings.v1';
 const ONBOARD_KEY = 'arbor.onboarded.v1';
 
 function loadSettings(): Settings {
-  const defaults: Settings = { enabled: true, nudge: 'active', showTags: true, theme: 'system' };
+  const defaults: Settings = { enabled: true, nudge: 'active', showTags: true, theme: 'system', mascot: true, design: 'ascii' };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
@@ -98,7 +102,8 @@ function hasOnboarded() {
 }
 
 /**
- * URL parameters for demos and user tests, e.g. `?intro=0&view=forest&theme=dark&empty=1&nudge=gentle&arbor=off`.
+ * URL parameters for demos and user tests, e.g.
+ * `?design=ascii&intro=0&view=forest&theme=dark&empty=1&nudge=gentle&arbor=off&mascot=0`.
  */
 function urlParams() {
   try {
@@ -117,6 +122,10 @@ function init(): State {
   if (nudge === 'off' || nudge === 'gentle' || nudge === 'active') settings.nudge = nudge;
   if (p.get('arbor') === 'off') settings.enabled = false;
   if (p.get('arbor') === 'on') settings.enabled = true;
+  if (p.get('mascot') === '0') settings.mascot = false;
+  if (p.get('mascot') === '1') settings.mascot = true;
+  const design = p.get('design');
+  if (design === 'ascii' || design === 'classic') settings.design = design;
   return {
     ...(p.get('empty') === '1' ? { messages: [], concepts: {} } : seedState()),
     pendingQuiz: null,
@@ -126,6 +135,7 @@ function init(): State {
     forest: { open: p.get('view') === 'forest', focus: p.get('tree') },
     draft: { text: '', nonce: 0 },
     highlight: [],
+    composer: { lens: null, nudge: false },
     flash: null,
     onboarding: p.get('intro') === '1' || (p.get('intro') !== '0' && !hasOnboarded()),
     toast: null,
@@ -159,6 +169,29 @@ function reducer(s: State, a: Action): State {
             : m,
         ),
       };
+    case 'reveal': {
+      // A guess before reading turns a delegated prompt into thinking together.
+      const i = s.messages.findIndex((m) => m.id === a.id);
+      const guess = a.guess.trim();
+      const userIdx = guess ? s.messages.slice(0, i).map((m) => m.role).lastIndexOf('user') : -1;
+      return {
+        ...s,
+        messages: s.messages.map((m, j) => {
+          if (j === i) return { ...m, veiled: false, guess: guess || undefined };
+          if (j === userIdx && m.classification && m.classification.mode === 'ai') {
+            return {
+              ...m,
+              classification: {
+                ...m.classification,
+                mode: 'together',
+                reasons: [...m.classification.reasons, 'You predicted the answer before reading it'],
+              },
+            };
+          }
+          return m;
+        }),
+      };
+    }
     case 'settings':
       return { ...s, settings: { ...s.settings, ...a.patch } };
     case 'panel':
@@ -169,6 +202,9 @@ function reducer(s: State, a: Action): State {
       return { ...s, draft: { text: a.text, nonce: s.draft.nonce + 1 } };
     case 'highlight':
       return { ...s, highlight: a.ids };
+    case 'composer':
+      if (s.composer.lens === a.lens && s.composer.nudge === a.nudge) return s;
+      return { ...s, composer: { lens: a.lens, nudge: a.nudge } };
     case 'flash':
       return { ...s, flash: { id: a.id, nonce: (s.flash?.nonce ?? 0) + 1 } };
     case 'onboarding':
@@ -222,7 +258,8 @@ interface Ctx {
   state: State;
   dispatch: React.Dispatch<Action>;
   liveTree: TreeData;
-  send: (text: string, cls?: Classification) => void;
+  /** `veil`: hide the answer until the user guesses or reveals it (predict → reveal). */
+  send: (text: string, cls?: Classification, opts?: { veil?: boolean }) => void;
   /** Classify with the current conversation context (e.g. a pending quiz). */
   classifyDraft: (text: string) => Classification;
   jumpTo: (messageId: string) => void;
@@ -257,7 +294,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const send = useCallback(
-    (text: string, cls?: Classification) => {
+    (text: string, cls?: Classification, opts?: { veil?: boolean }) => {
       const s = ref.current;
       if (s.busy || !text.trim()) return;
       const classification = cls ?? classifyDraft(text);
@@ -280,7 +317,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             userId: user.id,
             concepts: result.concepts,
             pendingQuiz: result.pendingQuiz,
-            msg: { id: aid, role: 'assistant', text: '', conceptIds: result.concepts.map((c) => c.id), streaming: true, reflectOn: result.reflectOn },
+            msg: {
+              id: aid,
+              role: 'assistant',
+              text: '',
+              conceptIds: result.concepts.map((c) => c.id),
+              streaming: true,
+              reflectOn: result.reflectOn,
+              veiled: opts?.veil || undefined,
+            },
           });
           const tokens = result.reply.split(/(\s+)/);
           let i = 0;

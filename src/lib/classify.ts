@@ -1,4 +1,4 @@
-import type { Classification, Mode } from './types';
+import type { Classification, Evidence, Mode } from './types';
 
 /**
  * Transparent, rule-based classifier: "who is doing the thinking in this prompt?"
@@ -12,6 +12,8 @@ interface Rule {
   re: RegExp;
   weight: number;
   reason: (m: RegExpMatchArray) => string;
+  /** The words to point at, relative to the match (default: the whole match). */
+  span?: (m: RegExpMatchArray) => [number, number];
 }
 
 const q = (s: string) => `“${s.trim()}”`;
@@ -77,6 +79,7 @@ const AI: Rule[] = [
     re: /^(please\s+)?((can|could|would) you\s+)?(please\s+)?(write|give|make|create|generate|summari[sz]e|list|solve|do|draft|compose|rewrite|fix|translate|calculate|compute|produce|outline|prepare|answer|explain|define|describe|tell me)\b/i,
     weight: 1,
     reason: (m) => `Starts with ${q(m[5])} — asks the AI to produce it`,
+    span: (m) => [m[0].length - m[5].length, m[0].length],
   },
   {
     re: /\b(just (give|tell|write|do)|the answer|for me|cheat ?sheet|summary|tl;?dr|exam notes)\b/i,
@@ -95,18 +98,37 @@ const GIVE_UP = /\b(i don'?t know|no idea|not sure|just tell me|tell me the answ
 /** Template text inserted by Arbor's nudge — doesn't count until the user adds to it. */
 const EMPTY_TEMPLATE = /\n*\s*my first guess:\s*$/i;
 
-function run(rules: Rule[], text: string) {
+/** A reason, and where it comes from in the text (start < 0: no particular words). */
+interface Hit {
+  reason: string;
+  start: number;
+  end: number;
+  mode: Mode;
+}
+
+function run(rules: Rule[], text: string, mode: Mode, offset: number) {
   let score = 0;
-  const reasons: string[] = [];
+  const hits: Hit[] = [];
   for (const r of rules) {
     const m = text.match(r.re);
     if (m) {
       score += r.weight;
-      reasons.push(r.reason(m));
+      const [a, b] = r.span ? r.span(m) : [0, m[0].length];
+      const at = (m.index ?? 0) + offset;
+      hits.push({ reason: r.reason(m), start: at + a, end: at + b, mode });
     }
   }
-  return { score, reasons };
+  return {
+    score,
+    hits,
+    get reasons() {
+      return hits.map((h) => h.reason);
+    },
+  };
 }
+
+const evidenceOf = (hits: Hit[]): Evidence[] =>
+  hits.filter((h) => h.start >= 0 && h.end > h.start).map(({ start, end, mode, reason }) => ({ start, end, mode, reason }));
 
 export interface ClassifyContext {
   /** Concept id if the AI just asked the user a quiz question. */
@@ -114,60 +136,70 @@ export interface ClassifyContext {
 }
 
 export function classify(raw: string, ctx: ClassifyContext = {}): Classification {
-  const text = raw.replace(/[’‘]/g, "'").replace(EMPTY_TEMPLATE, '').trim();
+  // Same length as `raw` (one-for-one quote swap), so match offsets point into the original text.
+  const norm = raw.replace(/[’‘]/g, "'");
+  const lead = norm.length - norm.trimStart().length;
+  const text = norm.replace(EMPTY_TEMPLATE, '').trim();
   const words = text.split(/\s+/).filter(Boolean).length;
 
-  if (!text) return { mode: 'together', confidence: 0, reasons: [] };
+  if (!text) return { mode: 'together', confidence: 0, reasons: [], evidence: [] };
 
   // Answering a quiz question is retrieval practice — the strongest form of own thinking.
   if (ctx.pendingQuiz && !/\b(quiz|test) me\b/i.test(text)) {
-    if (GIVE_UP.test(text)) {
-      return { mode: 'ai', confidence: 0.8, reasons: ['Asked the AI to reveal the answer'] };
+    const g = text.match(GIVE_UP);
+    if (g) {
+      const at = (g.index ?? 0) + lead;
+      return {
+        mode: 'ai',
+        confidence: 0.8,
+        reasons: ['Asked the AI to reveal the answer'],
+        evidence: [{ start: at, end: at + g[0].length, mode: 'ai', reason: 'Asked the AI to reveal the answer' }],
+      };
     }
-    return { mode: 'own', confidence: 0.9, reasons: ['Answers the quiz question from memory'] };
+    return { mode: 'own', confidence: 0.9, reasons: ['Answers the quiz question from memory'], evidence: [] };
   }
 
-  const own = run(OWN, text);
-  const tog = run(TOGETHER, text);
-  const ai = run(AI, text);
+  const own = run(OWN, text, 'own', lead);
+  const tog = run(TOGETHER, text, 'together', lead);
+  const ai = run(AI, text, 'ai', lead);
 
   // Long, first-person messages usually carry the user's own reasoning.
   const firstPerson = (text.match(/\b(i|my|i'm|i've|me)\b/gi) ?? []).length;
   if (words > 28 && firstPerson >= 2 && own.score === 0) {
     own.score += 0.6;
-    own.reasons.push('A longer message written in your own words');
+    own.hits.push({ reason: 'A longer message written in your own words', start: -1, end: -1, mode: 'own' });
   }
 
   const conf = (s: number) => Math.min(0.95, 0.55 + 0.15 * s);
   let mode: Mode;
-  let reasons: string[];
+  let hits: Hit[];
   let confidence: number;
 
   if (own.score > 0 && ai.score > own.score) {
     mode = 'together';
-    reasons = [...own.reasons, ...ai.reasons];
+    hits = [...own.hits, ...ai.hits];
     confidence = 0.6;
   } else if (own.score > 0) {
     mode = 'own';
-    reasons = [...own.reasons, ...tog.reasons];
+    hits = [...own.hits, ...tog.hits];
     confidence = conf(own.score);
   } else if (tog.score > 0) {
     mode = 'together';
-    reasons = [...tog.reasons, ...ai.reasons.map((r) => `${r} — but framed as a question to explore`)].slice(0, 3);
+    hits = [...tog.hits, ...ai.hits.map((h) => ({ ...h, reason: `${h.reason} — but framed as a question to explore` }))].slice(0, 3);
     confidence = conf(tog.score - ai.score * 0.3);
   } else if (ai.score > 0) {
     mode = 'ai';
-    reasons = ai.reasons;
+    hits = ai.hits;
     confidence = conf(ai.score);
   } else if (words <= 5) {
     mode = 'ai';
-    reasons = ['Short request — the AI fills in the rest'];
+    hits = [{ reason: 'Short request — the AI fills in the rest', start: -1, end: -1, mode: 'ai' }];
     confidence = 0.5;
   } else {
     mode = 'together';
-    reasons = ['An open question — no clear sign of delegating or of your own take'];
+    hits = [{ reason: 'An open question — no clear sign of delegating or of your own take', start: -1, end: -1, mode: 'together' }];
     confidence = 0.4;
   }
 
-  return { mode, confidence, reasons };
+  return { mode, confidence, reasons: hits.map((h) => h.reason), evidence: evidenceOf(hits) };
 }

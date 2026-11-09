@@ -1,10 +1,10 @@
 import { ArrowUp, FlaskConical, Lightbulb, PenLine, Sparkles, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CONCEPT_BY_ID, DEMO_PROMPTS, LIVE_TREE } from '../data/scenario';
-import { useDismiss } from '../lib/hooks';
-import { MODES, MODE_META, pct } from '../lib/modes';
-import { useStore } from '../lib/store';
-import type { ChatMessage, Classification } from '../lib/types';
+import { CONCEPT_BY_ID, DEMO_PROMPTS, LIVE_TREE } from '../../../data/scenario';
+import { useDismiss } from '../../../lib/hooks';
+import { MODES, MODE_META, pct } from '../../../lib/modes';
+import { useStore } from '../../../lib/store';
+import type { ChatMessage, Classification } from '../../../lib/types';
 import { ArborLogo, Glyph } from './Glyph';
 import { Markdown } from './Markdown';
 
@@ -253,6 +253,13 @@ function Composer() {
     }
     doSend(text, c);
   };
+
+  // Share what the composer shows (lens, nudge) so the panel's squirrel can react while you type.
+  const liveLens = enabled && lens ? lens.mode : null;
+  const nudgeOpen = enabled && nudge !== null;
+  useEffect(() => {
+    dispatch({ type: 'composer', lens: liveLens, nudge: nudgeOpen });
+  }, [liveLens, nudgeOpen, dispatch]);
 
   const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 

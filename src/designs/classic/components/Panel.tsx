@@ -1,11 +1,13 @@
 import { Info, Pause, Play, RotateCcw, Settings as SettingsIcon, Trees, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { layoutTree, type PlacedBranch, type PlacedLeaf } from '../lib/layout';
-import { useDismiss, useSize } from '../lib/hooks';
-import { MODE_META, MODE_SCORE, mean, pct, scoreToMode } from '../lib/modes';
-import { useStore, type State } from '../lib/store';
-import type { NudgeLevel, Theme } from '../lib/types';
+import { useDismiss, useSize } from '../../../lib/hooks';
+import { layoutTree, type PlacedBranch, type PlacedLeaf } from '../../../lib/layout';
+import { MODE_META, MODE_SCORE, mean, pct, scoreToMode } from '../../../lib/modes';
+import { CONCEPT_BY_ID } from '../../../data/scenario';
+import { useStore, type State } from '../../../lib/store';
+import type { Design, Mode, NudgeLevel, Theme } from '../../../lib/types';
 import { ArborLogo, Glyph } from './Glyph';
+import { Squirrel, type SquirrelPose } from './Squirrel';
 import { TreeSvg, type LeafEvent } from './TreeSvg';
 
 export function ArborPanel() {
@@ -30,7 +32,7 @@ export function ArborPanel() {
 
       {!enabled ? (
         <div className="panel-paused">
-          <Pause size={22} />
+          {state.settings.mascot ? <Squirrel pose="sleep" size={64} /> : <Pause size={22} />}
           <h3>Arbor is paused</h3>
           <p>The chat now looks exactly as it would without the extension. Nothing is labelled or collected.</p>
           <button className="btn btn-you" onClick={() => dispatch({ type: 'settings', patch: { enabled: true } })}>
@@ -123,8 +125,119 @@ function Balance() {
           ))}
         </div>
       )}
-      <p className="insight">{insightFor(state)}</p>
+      {state.settings.mascot ? <Mascot insight={insightFor(state)} /> : <p className="insight">{insightFor(state)}</p>}
     </section>
+  );
+}
+
+/* ───────────── Mascot ───────────── */
+
+/** While typing, the squirrel reads the composer's lens (feedforward), in the same words as the tags. */
+const LENS_LINE: Record<Mode, string> = {
+  own: 'You’re reasoning this one through yourself — its leaf will grow in filled.',
+  together: 'You’re exploring this with the AI — the leaf will be half yours.',
+  ai: 'This one hands the thinking to the AI. Totally fine — just good to know.',
+};
+const NUDGE_LINE = 'Before you send: what’s your hunch? A rough guess is plenty.';
+
+/** True for a moment after a new prompt labelled "your thinking" arrives. */
+function useCheer(count: number, lastMode: Mode | null) {
+  const [cheer, setCheer] = useState(false);
+  const prev = useRef(count);
+  useEffect(() => {
+    const grew = count > prev.current;
+    prev.current = count;
+    if (!grew || lastMode !== 'own') return;
+    setCheer(true);
+    const t = window.setTimeout(() => setCheer(false), 1500);
+    return () => {
+      clearTimeout(t);
+      setCheer(false);
+    };
+  }, [count, lastMode]);
+  return cheer;
+}
+
+/**
+ * The squirrel speaks the panel's insight and mirrors who is thinking: live while you type,
+ * otherwise the last prompt. Its acorn is the ●◑○ glyph, so it adds no new visual language.
+ */
+interface SquirrelTip {
+  text: string;
+  action?: { label: string; run: () => void };
+}
+
+/** Poking the squirrel cycles through things worth doing right now. */
+function useSquirrelTips(): SquirrelTip[] {
+  const { state, dispatch, liveTree, send } = useStore();
+  const leaves = liveTree.branches.flatMap((b) => b.leaves);
+  const weakest = [...leaves].filter((l) => CONCEPT_BY_ID[l.id]).sort((a, b) => a.score - b.score)[0];
+  const tips: SquirrelTip[] = [];
+  if (weakest && weakest.score < 1) {
+    tips.push({
+      text: `“${weakest.label}” is ${weakest.score === 0 ? 'still all the AI’s' : 'only half yours'}. Want me to quiz you on it?`,
+      action: state.busy ? undefined : { label: 'Quiz me', run: () => send(`Quiz me on ${weakest.label.toLowerCase()}`) },
+    });
+  } else if (leaves.length) {
+    tips.push({ text: 'Every leaf on this tree is yours. I’m impressed.' });
+  }
+  tips.push({
+    text: 'Every chat you have grows a tree. Pinch out on this one to see the forest.',
+    action: { label: 'Open the forest', run: () => dispatch({ type: 'forest', open: true }) },
+  });
+  return tips;
+}
+
+const DIZZY_LINE = 'Whoa. Okay. Okay. I’m dizzy.';
+
+function Mascot({ insight }: { insight: string }) {
+  const { state } = useStore();
+  const { composer } = state;
+  const turns = state.messages.filter((m) => m.role === 'user' && m.classification);
+  const lastMode = turns.length ? turns[turns.length - 1].classification!.mode : null;
+  const cheer = useCheer(turns.length, lastMode);
+
+  const pose: SquirrelPose = composer.nudge ? 'nudge' : cheer ? 'cheer' : (composer.lens ?? lastMode ?? 'idle');
+  const [say, sayKey] = composer.nudge
+    ? [NUDGE_LINE, 'nudge']
+    : composer.lens
+      ? [LENS_LINE[composer.lens], `lens-${composer.lens}`]
+      : [insight, `insight-${turns.length}-${lastMode}`];
+
+  // A tip holds the floor until something new happens, or for a while.
+  const tips = useSquirrelTips();
+  const [tip, setTip] = useState<{ i: number; n: number } | null>(null);
+  useEffect(() => setTip(null), [sayKey]);
+  useEffect(() => {
+    if (!tip) return;
+    const t = window.setTimeout(() => setTip(null), 10000);
+    return () => clearTimeout(t);
+  }, [tip]);
+  const poke = (dizzy: boolean) =>
+    setTip((t) => ({ i: dizzy ? -1 : t && t.i >= 0 ? (t.i + 1) % tips.length : 0, n: (t?.n ?? 0) + 1 }));
+  const shown = tip ? (tip.i < 0 ? { text: DIZZY_LINE } : tips[Math.min(tip.i, tips.length - 1)]) : null;
+
+  return (
+    <div className="mascot">
+      <p className={`insight${shown ? ' is-tip' : ''}`} key={shown ? `tip-${tip!.n}` : sayKey} aria-live="polite">
+        {shown ? shown.text : say}
+        {shown?.action && (
+          <>
+            {' '}
+            <button
+              className="link"
+              onClick={() => {
+                shown.action!.run();
+                setTip(null);
+              }}
+            >
+              {shown.action.label}
+            </button>
+          </>
+        )}
+      </p>
+      <Squirrel pose={pose} onPoke={poke} />
+    </div>
   );
 }
 
@@ -271,6 +384,10 @@ const NUDGE_OPTS: { v: NudgeLevel; label: string; desc: string }[] = [
   { v: 'gentle', label: 'Gentle', desc: 'A live label while you type. Never interrupts.' },
   { v: 'active', label: 'Active', desc: 'Before you delegate, Arbor offers to add your own take first.' },
 ];
+const DESIGN_OPTS: { v: Design; label: string }[] = [
+  { v: 'classic', label: 'Classic' },
+  { v: 'ascii', label: 'ASCII' },
+];
 const THEME_OPTS: { v: Theme; label: string }[] = [
   { v: 'system', label: 'System' },
   { v: 'light', label: 'Light' },
@@ -305,11 +422,24 @@ function SettingsMenu({ open, setOpen }: { open: boolean; setOpen: (o: boolean) 
             <span>Label my messages</span>
             <input type="checkbox" checked={s.showTags} onChange={(e) => set({ showTags: e.target.checked })} />
           </label>
+          <label className="toggle-row">
+            <span>Show squirrel</span>
+            <input type="checkbox" checked={s.mascot} onChange={(e) => set({ mascot: e.target.checked })} />
+          </label>
 
           <p className="pop-sub">Theme</p>
           <div className="segmented" role="radiogroup" aria-label="Theme">
             {THEME_OPTS.map((o) => (
               <button key={o.v} role="radio" aria-checked={s.theme === o.v} className={s.theme === o.v ? 'on' : ''} onClick={() => set({ theme: o.v })}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="pop-sub">Design</p>
+          <div className="segmented" role="radiogroup" aria-label="Design style">
+            {DESIGN_OPTS.map((o) => (
+              <button key={o.v} role="radio" aria-checked={s.design === o.v} className={s.design === o.v ? 'on' : ''} onClick={() => set({ design: o.v })}>
                 {o.label}
               </button>
             ))}
